@@ -1,0 +1,10 @@
+pandas
+numpy
+yfinance
+requests
+statsmodels
+arch
+scikit-learn
+matplotlib
+python-dotenv
+anthropic
