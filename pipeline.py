@@ -1,6 +1,8 @@
 import io
+import sqlite3
 import zipfile
 from datetime import date
+from pathlib import Path
 
 import pandas as pd
 import requests
@@ -9,6 +11,7 @@ import yfinance as yf
 TICKERS = ["NVDA", "AMD", "AVGO", "QCOM", "INTC", "MU", "TSM", "ASML", "SNPS", "CDNS"]
 BENCHMARKS = ["SOXX", "SPY"]
 START_DATE = "2016-01-01"
+DB_PATH = Path("data") / "semis.db"
 FACTORS_URL = (
     "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/"
     "F-F_Research_Data_Factors_daily_CSV.zip"
@@ -105,6 +108,57 @@ def transform_factors(text):
     return df.reset_index(drop=True)
 
 
+def load(prices, factors):
+    # SQLite creates the file but not the folder, so make sure data/ exists first
+    DB_PATH.parent.mkdir(exist_ok=True)
+
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        # IF NOT EXISTS keeps the primary keys and lets the script be run repeatedly
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS prices (
+                ticker TEXT,
+                date TEXT,
+                adj_close REAL,
+                PRIMARY KEY (ticker, date)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS factors (
+                date TEXT PRIMARY KEY,
+                mkt_rf REAL,
+                smb REAL,
+                hml REAL,
+                rf REAL
+            )
+            """
+        )
+
+        # "with conn" is one transaction: commit if it succeeds, roll back if anything fails,
+        # so a crash halfway leaves the previous complete data untouched
+        with conn:
+            # Delete everything and reinsert, because adjusted prices are restated over time
+            conn.execute("DELETE FROM prices")
+            conn.execute("DELETE FROM factors")
+
+            # Column order here must match the table columns above
+            conn.executemany(
+                "INSERT INTO prices (ticker, date, adj_close) VALUES (?, ?, ?)",
+                prices[["ticker", "date", "adj_close"]].itertuples(index=False, name=None),
+            )
+            conn.executemany(
+                "INSERT INTO factors (date, mkt_rf, smb, hml, rf) VALUES (?, ?, ?, ?, ?)",
+                factors[["date", "mkt_rf", "smb", "hml", "rf"]].itertuples(
+                    index=False, name=None
+                ),
+            )
+    finally:
+        conn.close()
+
+
 def main():
     raw_prices = extract_prices()
     factors_text = extract_factors()
@@ -120,6 +174,17 @@ def main():
     print("Factors last 3 rows:")
     print(factors.tail(3))
     print("Factors total rows:", len(factors))
+
+    load(prices, factors)
+
+    # Read the counts back from the database to confirm what was actually stored
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        for table in ["prices", "factors"]:
+            count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            print(f"{table} rows in database:", count)
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":
