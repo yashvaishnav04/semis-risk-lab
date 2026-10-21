@@ -2,6 +2,7 @@ import io
 import zipfile
 from datetime import date
 
+import pandas as pd
 import requests
 import yfinance as yf
 
@@ -38,13 +39,87 @@ def extract_factors():
         return zf.read(csv_name).decode("utf-8")
 
 
+def transform_prices(raw):
+    # Keep only Close; with auto_adjust=True it is already the adjusted close
+    close = raw["Close"]
+
+    # Wide (one column per ticker) to long (one row per ticker and date)
+    long = close.reset_index().melt(
+        id_vars="Date", var_name="ticker", value_name="adj_close"
+    )
+    long = long.rename(columns={"Date": "date"})
+
+    # SQLite has no date type, so store dates as YYYY-MM-DD text
+    long["date"] = long["date"].dt.strftime("%Y-%m-%d")
+
+    # Drop missing prices; forward filling would invent prices that never traded
+    missing = long["adj_close"].isna().sum()
+    long = long.dropna(subset=["adj_close"])
+    print("Missing price rows dropped:", missing)
+
+    # The primary key is (ticker, date), so duplicates would break the load
+    long = long.drop_duplicates(subset=["ticker", "date"])
+
+    return long.reset_index(drop=True)
+
+
+def transform_factors(text):
+    lines = text.splitlines()
+
+    # Find the header by its leading comma, so extra text lines at the top do not matter
+    header_index = next(i for i, line in enumerate(lines) if line.startswith(","))
+
+    # Read data rows until the first line that does not start with a digit,
+    # which is where the copyright footer begins
+    data_lines = []
+    for line in lines[header_index + 1:]:
+        if not line[:1].isdigit():
+            break
+        data_lines.append(line)
+
+    csv_text = lines[header_index] + "\n" + "\n".join(data_lines)
+    df = pd.read_csv(io.StringIO(csv_text))
+
+    # The first column has no name in the file, so name it date
+    df = df.rename(columns={df.columns[0]: "date"})
+
+    # -99.99 and -999 mean "missing" in the source; fail loudly instead of using them as returns
+    factor_cols = df.columns[1:]
+    if df[factor_cols].isin([-99.99, -999]).any().any():
+        raise ValueError("Factor data contains a missing-value code (-99.99 or -999)")
+
+    # Dates arrive as YYYYMMDD numbers; convert to YYYY-MM-DD text
+    df["date"] = pd.to_datetime(df["date"].astype(str), format="%Y%m%d").dt.strftime(
+        "%Y-%m-%d"
+    )
+
+    # Values are in percent, so divide by 100 to get decimals
+    df[factor_cols] = df[factor_cols] / 100
+    df.columns = ["date", "mkt_rf", "smb", "hml", "rf"]
+
+    # YYYY-MM-DD text sorts in date order, so a string comparison works here
+    df = df[df["date"] >= START_DATE]
+
+    df = df.drop_duplicates(subset=["date"])
+
+    return df.reset_index(drop=True)
+
+
 def main():
-    prices = extract_prices()
+    raw_prices = extract_prices()
     factors_text = extract_factors()
 
-    print("Prices shape:", prices.shape)
-    print("Factors text (first 300 characters):")
-    print(factors_text[:300])
+    prices = transform_prices(raw_prices)
+    factors = transform_factors(factors_text)
+
+    print("Price rows per ticker:")
+    print(prices.groupby("ticker").size())
+
+    print("Factors first 3 rows:")
+    print(factors.head(3))
+    print("Factors last 3 rows:")
+    print(factors.tail(3))
+    print("Factors total rows:", len(factors))
 
 
 if __name__ == "__main__":
