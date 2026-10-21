@@ -26,4 +26,4 @@ Learning project by Yash: a public portfolio repo showing data and risk skills f
 - Idempotency: every run downloads the full history and overwrites existing rows. Never append only new days, because adjusted prices are restated after every split and dividend.
 
 ## pipeline.py structure
-- Three functions, extract, transform and load, called in order from main.
+- Five functions, extract_prices, extract_factors, transform_prices, transform_factors and load, called in order from main.
