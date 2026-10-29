@@ -4,6 +4,9 @@ import pandas as pd
 
 DB_PATH = "data/semis.db"
 
+# Approximate number of trading days in a year, used to annualise daily numbers
+TRADING_DAYS = 252
+
 STOCKS = ["NVDA", "AMD", "AVGO", "QCOM", "TSM", "INTC", "MU", "ASML", "SNPS", "CDNS"]
 BENCHMARKS = ["SOXX", "SPY"]
 
@@ -65,6 +68,19 @@ def portfolio_returns(returns):
     return portfolio
 
 
+def annualised_volatility(returns):
+    """Sample standard deviation of each column, scaled from daily to yearly."""
+    # Volatility grows with the square root of time, not linearly
+    return returns.std(ddof=1) * TRADING_DAYS**0.5
+
+
+def beta(returns, benchmark="SOXX"):
+    """Beta of each column vs the benchmark: cov(column, benchmark) / var(benchmark)."""
+    # Both use ddof=1 so the sample-size correction cancels consistently
+    covariances = returns.cov(ddof=1)[benchmark]
+    return covariances / returns[benchmark].var(ddof=1)
+
+
 def main():
     prices = load_prices()
     print("Prices shape:", prices.shape)
@@ -77,6 +93,16 @@ def main():
     portfolio = portfolio_returns(returns)
     print("First three portfolio returns:")
     print(portfolio.head(3))
+
+    # Put the portfolio next to the tickers so one call scores everything
+    all_returns = returns.join(portfolio)
+    summary = pd.DataFrame(
+        {
+            "volatility": annualised_volatility(all_returns),
+            "beta_vs_SOXX": beta(all_returns, "SOXX"),
+        }
+    )
+    print(summary.round(3))
 
 
 if __name__ == "__main__":
