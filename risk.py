@@ -81,6 +81,37 @@ def beta(returns, benchmark="SOXX"):
     return covariances / returns[benchmark].var(ddof=1)
 
 
+def load_factors():
+    """Read the daily risk-free rate (rf) from the factors table, indexed by date."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        factors = pd.read_sql_query("SELECT date, rf FROM factors", conn)
+    finally:
+        conn.close()
+
+    factors["date"] = pd.to_datetime(factors["date"])
+    return factors.set_index("date")["rf"]
+
+
+def sharpe_ratio(returns, rf):
+    """Annualised Sharpe ratio: mean daily excess return / its sample std, scaled by sqrt(252)."""
+    aligned = rf.reindex(returns.index)
+    last_factor_date = rf.index.max()
+
+    # A gap inside the factor history is bad data, so fail instead of guessing
+    gaps = aligned[aligned.isna() & (aligned.index <= last_factor_date)]
+    if not gaps.empty:
+        raise ValueError(f"rf missing on {len(gaps)} dates within the factor range")
+
+    # The factor file lags the prices, so carry the last known rf forward for the newest days
+    newer = aligned.index > last_factor_date
+    aligned[newer] = rf.iloc[-1]
+    print(f"rf forward filled on {int(newer.sum())} days after {last_factor_date.date()}")
+
+    excess = returns.sub(aligned, axis=0)
+    return excess.mean() / excess.std(ddof=1) * TRADING_DAYS**0.5
+
+
 def main():
     prices = load_prices()
     print("Prices shape:", prices.shape)
@@ -100,6 +131,7 @@ def main():
         {
             "volatility": annualised_volatility(all_returns),
             "beta_vs_SOXX": beta(all_returns, "SOXX"),
+            "sharpe": sharpe_ratio(all_returns, load_factors()),
         }
     )
     print(summary.round(3))
