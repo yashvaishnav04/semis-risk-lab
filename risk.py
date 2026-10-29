@@ -111,6 +111,12 @@ def sharpe_ratio(returns, rf):
     excess = returns.sub(aligned, axis=0)
     return excess.mean() / excess.std(ddof=1) * TRADING_DAYS**0.5
 
+def max_drawdown(returns):
+    """Largest fall in value from its highest point so far, as a negative number."""
+    wealth = (1+ returns).cumprod()
+    peak = wealth.cummax()
+    drawdown = wealth/peak - 1
+    return drawdown.min()
 
 def main():
     prices = load_prices()
@@ -132,6 +138,7 @@ def main():
             "volatility": annualised_volatility(all_returns),
             "beta_vs_SOXX": beta(all_returns, "SOXX"),
             "sharpe": sharpe_ratio(all_returns, load_factors()),
+            "max_drawdown": max_drawdown(all_returns),
         }
     )
     print(summary.round(3))
