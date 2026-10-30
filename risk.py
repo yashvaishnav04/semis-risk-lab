@@ -7,6 +7,9 @@ DB_PATH = "data/semis.db"
 # Approximate number of trading days in a year, used to annualise daily numbers
 TRADING_DAYS = 252
 
+# Confidence level for VaR and expected shortfall: 95% means we look at the worst 5% of days
+CONFIDENCE = 0.95
+
 STOCKS = ["NVDA", "AMD", "AVGO", "QCOM", "TSM", "INTC", "MU", "ASML", "SNPS", "CDNS"]
 BENCHMARKS = ["SOXX", "SPY"]
 
@@ -118,6 +121,24 @@ def max_drawdown(returns):
     drawdown = wealth/peak - 1
     return drawdown.min()
 
+def historical_var(returns, confidence=CONFIDENCE):
+    """Historical VaR: the (1 - confidence) quantile of daily returns, kept negative."""
+    # No sign flip: a loss stays a negative return, like max_drawdown
+    return returns.quantile(1 - confidence)
+
+
+def expected_shortfall(returns, confidence=CONFIDENCE):
+    """Expected shortfall: the mean of the daily returns at or below the VaR."""
+    var = historical_var(returns, confidence)
+    # le aligns the VaR Series to the columns, so each stock is compared to its own VaR
+    tail = returns.where(returns.le(var))
+    es = tail.mean()
+
+    # The average of the tail cannot be above its cut-off; if it is, something is wrong
+    if (es > var).any():
+        raise ValueError("Expected shortfall is greater than VaR for at least one column")
+    return es
+
 def main():
     prices = load_prices()
     print("Prices shape:", prices.shape)
@@ -139,6 +160,8 @@ def main():
             "beta_vs_SOXX": beta(all_returns, "SOXX"),
             "sharpe": sharpe_ratio(all_returns, load_factors()),
             "max_drawdown": max_drawdown(all_returns),
+            "var_95": historical_var(all_returns),
+            "es_95": expected_shortfall(all_returns),
         }
     )
     print(summary.round(3))
