@@ -139,6 +139,11 @@ def expected_shortfall(returns, confidence=CONFIDENCE):
         raise ValueError("Expected shortfall is greater than VaR for at least one column")
     return es
 
+def correlation_matrix(returns):
+    """Pairwise correlation of the daily returns of the 10 stocks (Pearson, the pandas default)."""
+    # Only the stocks: benchmarks and the portfolio would just repeat the same information
+    return returns[STOCKS].corr()
+
 def main():
     prices = load_prices()
     print("Prices shape:", prices.shape)
@@ -165,6 +170,11 @@ def main():
         }
     )
     print(summary.round(3))
+
+    print("Correlation matrix of daily stock returns:")
+    print(correlation_matrix(all_returns).round(2))
+    # SOXX is not in the matrix, so check one stock against it directly
+    print("Check: SNPS vs SOXX correlation:", round(all_returns["SNPS"].corr(all_returns["SOXX"]), 3))
 
 
 if __name__ == "__main__":
