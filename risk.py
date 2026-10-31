@@ -144,6 +144,17 @@ def correlation_matrix(returns):
     # Only the stocks: benchmarks and the portfolio would just repeat the same information
     return returns[STOCKS].corr()
 
+def tracking_error(portfolio, benchmark):
+    """Annualised sample std of the daily active return (portfolio minus benchmark)."""
+    active = portfolio - benchmark
+    return active.std(ddof=1) * TRADING_DAYS**0.5
+
+def information_ratio(portfolio, benchmark):
+    """Annualised mean daily active return divided by the tracking error."""
+    active = portfolio - benchmark
+    # Mean scales linearly with time, while the tracking error already scales with sqrt of time
+    return active.mean() * TRADING_DAYS / tracking_error(portfolio, benchmark)
+
 def main():
     prices = load_prices()
     print("Prices shape:", prices.shape)
@@ -175,6 +186,10 @@ def main():
     print(correlation_matrix(all_returns).round(2))
     # SOXX is not in the matrix, so check one stock against it directly
     print("Check: SNPS vs SOXX correlation:", round(all_returns["SNPS"].corr(all_returns["SOXX"]), 3))
+
+    print("Portfolio vs SOXX")
+    print("Tracking error:", round(tracking_error(all_returns["PORTFOLIO"], all_returns["SOXX"]), 3))
+    print("Information ratio:", round(information_ratio(all_returns["PORTFOLIO"], all_returns["SOXX"]), 3))
 
 
 if __name__ == "__main__":
