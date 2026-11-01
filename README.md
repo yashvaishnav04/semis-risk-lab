@@ -11,8 +11,8 @@ Risk analytics for ten semiconductor stocks, built from raw market data up to po
 | Stage | Status |
 |---|---|
 | Data pipeline (Python, SQLite) and SQL analysis | Done |
-| Risk metrics: volatility, beta, Sharpe, drawdown, VaR, expected shortfall, tracking error | Next |
-| Attribution: Brinson-Fachler and a Fama French 3-factor regression | Planned |
+| Risk metrics: volatility, beta, Sharpe, drawdown, VaR, expected shortfall, tracking error | Done |
+| Attribution: Brinson-Fachler and a Fama French 3-factor regression | Next |
 | Time series: stationarity tests, rolling beta, GARCH(1,1) | Planned |
 | Machine learning: next-month realised volatility | Planned |
 | LLM extraction of 10-K risk factors, with every quote verified against the filing | Planned |
@@ -43,6 +43,20 @@ This rebuilds `data/semis.db` from nothing. The database is not committed; the p
 | `prices` | ticker, date, adj_close | (ticker, date) |
 | `factors` | date, mkt_rf, smb, hml, rf | date |
 
+## Risk analytics
+
+`risk.py` reads prices and factors from `data/semis.db`. It does not download anything, so run `pipeline.py` first.
+
+```powershell
+.venv\Scripts\python.exe risk.py
+```
+
+For each of the ten stocks, SOXX, SPY and a fixed weight portfolio, it computes the annualised volatility, beta vs SOXX, Sharpe ratio, maximum drawdown, and one-day 95% historical VaR and expected shortfall. It also computes a correlation matrix of the 10 stocks, and the portfolio's tracking error and information ratio vs SOXX.
+
+The results are written to [risk_report.md](risk_report.md).
+
+The `max_drawdown` function was written by hand.
+
 ## Design decisions
 
 - **Adjusted prices.** Returns use prices adjusted for splits and dividends, so a split does not appear as a loss.
@@ -63,3 +77,7 @@ Written by hand in `sql/`:
 - Factor data is published monthly, so the latest weeks of prices have no matching factors.
 - No 2016 annual return, because the price history starts in January 2016.
 - The latest year in the annual return query is year to date.
+- Both scripts must be run from the repo root, because the database path is relative.
+- The portfolio weights were chosen in 2026, so the backtest contains hindsight.
+- Historical VaR and expected shortfall only reflect losses seen in the sample period.
+- The risk-free rate is carried forward for the days after the latest Fama French data.
