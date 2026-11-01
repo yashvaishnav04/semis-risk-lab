@@ -10,6 +10,9 @@ TRADING_DAYS = 252
 # Confidence level for VaR and expected shortfall: 95% means we look at the worst 5% of days
 CONFIDENCE = 0.95
 
+# Where write_report saves the Markdown report (overwritten on every run)
+REPORT_PATH = "risk_report.md"
+
 STOCKS = ["NVDA", "AMD", "AVGO", "QCOM", "TSM", "INTC", "MU", "ASML", "SNPS", "CDNS"]
 BENCHMARKS = ["SOXX", "SPY"]
 
@@ -155,6 +158,92 @@ def information_ratio(portfolio, benchmark):
     # Mean scales linearly with time, while the tracking error already scales with sqrt of time
     return active.mean() * TRADING_DAYS / tracking_error(portfolio, benchmark)
 
+def markdown_table(headers, rows):
+    """Turn a header list and a list of rows (lists of strings) into a Markdown table."""
+    # Plain string joins, so no extra package (like tabulate) is needed
+    lines = ["| " + " | ".join(headers) + " |"]
+    lines.append("|" + "|".join(["---"] * len(headers)) + "|")
+    for row in rows:
+        lines.append("| " + " | ".join(row) + " |")
+    return "\n".join(lines)
+
+def write_report(summary, all_returns):
+    """Write the risk report as Markdown to REPORT_PATH, overwriting any old file."""
+    last_factor_date = load_factors().index.max().date()
+    first_date = all_returns.index.min().date()
+    last_date = all_returns.index.max().date()
+
+    # Biggest weight first; sorted is stable, so ties keep their order from WEIGHTS
+    weight_rows = [
+        [ticker, f"{weight * 100:.1f}%"]
+        for ticker, weight in sorted(WEIGHTS.items(), key=lambda item: item[1], reverse=True)
+    ]
+
+    # These four are shown as percentages, beta and Sharpe are plain ratios
+    # Stocks first, then the benchmarks, then the portfolio, instead of alphabetical order
+    summary_rows = []
+    for name, row in summary.loc[STOCKS + BENCHMARKS + ["PORTFOLIO"]].iterrows():
+        summary_rows.append(
+            [
+                name,
+                f"{row['volatility'] * 100:.1f}%",
+                f"{row['beta_vs_SOXX']:.2f}",
+                f"{row['sharpe']:.2f}",
+                f"{row['max_drawdown'] * 100:.1f}%",
+                f"{row['var_95'] * 100:.1f}%",
+                f"{row['es_95'] * 100:.1f}%",
+            ]
+        )
+
+    portfolio = all_returns["PORTFOLIO"]
+    soxx = all_returns["SOXX"]
+    te = tracking_error(portfolio, soxx)
+    ir = information_ratio(portfolio, soxx)
+
+    corr = correlation_matrix(all_returns)
+    corr_rows = [[name] + [f"{value:.2f}" for value in row] for name, row in corr.iterrows()]
+
+    lines = [
+        "# Semiconductor Portfolio Risk Report",
+        "",
+        f"Data period: {first_date} to {last_date} (daily returns). Last factor date: {last_factor_date}.",
+        "",
+        "## Portfolio weights",
+        "",
+        markdown_table(["Ticker", "Weight"], weight_rows),
+        "",
+        "## Summary",
+        "",
+        markdown_table(
+            ["Ticker", "Volatility", "Beta vs SOXX", "Sharpe", "Max drawdown", "VaR 95%", "ES 95%"],
+            summary_rows,
+        ),
+        "",
+        "## Portfolio vs SOXX",
+        "",
+        f"- Tracking error: {te * 100:.1f}%",
+        f"- Information ratio: {ir:.2f}",
+        "",
+        "## Correlation matrix",
+        "",
+        markdown_table([""] + list(corr.columns), corr_rows),
+        "",
+        "## Method notes",
+        "",
+        "- Returns are simple daily returns computed from adjusted closes.",
+        f"- Volatility and the Sharpe ratio are annualised with {TRADING_DAYS} trading days.",
+        "- Beta is measured against SOXX, the sector benchmark.",
+        "- The Sharpe ratio uses the Fama French daily rf; after the last factor date the last known rf is carried forward.",
+        f"- VaR and expected shortfall are one-day {CONFIDENCE:.0%} historical figures.",
+        "- The portfolio uses fixed weights, rebalanced daily.",
+        "- The weights were chosen in 2026, so the backtest contains hindsight.",
+        "",
+    ]
+
+    with open(REPORT_PATH, "w", encoding="utf-8") as file:
+        file.write("\n".join(lines))
+    return REPORT_PATH
+
 def main():
     prices = load_prices()
     print("Prices shape:", prices.shape)
@@ -190,6 +279,8 @@ def main():
     print("Portfolio vs SOXX")
     print("Tracking error:", round(tracking_error(all_returns["PORTFOLIO"], all_returns["SOXX"]), 3))
     print("Information ratio:", round(information_ratio(all_returns["PORTFOLIO"], all_returns["SOXX"]), 3))
+
+    print("Report written to:", write_report(summary, all_returns))
 
 
 if __name__ == "__main__":
